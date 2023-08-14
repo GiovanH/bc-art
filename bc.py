@@ -3,7 +3,7 @@ import os
 import requests
 import re
 
-from bs4 import BeautifulSoup as bs4
+import bs4
 from urllib.parse import urljoin
 
 import tqdm
@@ -105,7 +105,7 @@ def getArgs():
 
 async def getMetadataFromArtist(artist):
     artist_page_url = f"https://{artist}.bandcamp.com/music"
-    artist_page = bs4(requests.get(artist_page_url).text, features="html.parser")
+    artist_page = bs4.BeautifulSoup(requests.get(artist_page_url).text, features="html.parser")
     griditems = artist_page.findAll("li", class_="music-grid-item")
     for griditem in tqdm.tqdm(griditems, desc=artist, unit="album"):
         album_url = urljoin(artist_page_url, griditem.find("a").get("href"))
@@ -116,7 +116,7 @@ async def getMetadataFromArtist(artist):
 
 
 async def getMetadataFromAlbum(album, artist=None):
-    track_page = bs4(requests.get(album).text, features="html.parser")
+    track_page = bs4.BeautifulSoup(requests.get(album).text, features="html.parser")
     tracks = track_page.findAll(itemprop="tracks") + track_page.findAll(class_="track_row_view")
     for track in tqdm.tqdm(tracks, desc=album.split("/")[-1], unit="track"):
         track_no = track.find(class_="track-number-col").text
@@ -129,7 +129,7 @@ async def getMetadataFromAlbum(album, artist=None):
 
 async def getMetadataFromTrack(track, track_no=None, album=None, artist=None):
 
-    track_page = bs4(requests.get(track).text, features="html.parser")
+    track_page = bs4.BeautifulSoup(requests.get(track).text, features="html.parser")
     if not album:
         album = track_page.find("span", class_="fromAlbum").text
 
