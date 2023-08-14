@@ -7,77 +7,72 @@ from urllib.parse import urljoin
 
 import tqdm
 
-try:
-    from snip.filesystem import easySlug
-    from snip.net import getStream, saveStreamAs
-except ImportError:
-    print("Using local network implementation")
-    import urllib.parse
+import urllib.parse
 
-    def easySlug(string, repl="-", directory=False):
-        import re
-        if directory:
-            return re.sub(r"^\.|\.+$", "", easySlug(string, repl=repl, directory=False))
+def easySlug(string, repl="-", directory=False):
+    import re
+    if directory:
+        return re.sub(r"^\.|\.+$", "", easySlug(string, repl=repl, directory=False))
+    else:
+        return re.sub(r"[\\\\/:*?\"<>|\t]|\ +$", repl, string)
+
+def getStream(url, prev_url=None):
+    """Extremely light, dumb helper to get a stream from a url
+
+    Args:
+        url (str): Remote URL
+        prev_url (str, optional): Previous url, for relative resolution
+
+    Returns:
+        Requests stream
+    """
+    url = urllib.parse.urljoin(prev_url, url)
+    stream = requests.get(url, stream=True)
+    stream.raise_for_status()
+    return stream
+
+def _saveChunked(path, response):
+    """Save a binary stream to a path. Dumb.
+
+    Args:
+        path (str):
+        response (response):
+    """
+    try:
+        with open(path, 'wb') as file:
+            for chunk in response:
+                file.write(chunk)
+    except Exception:
+        # Clean up partial file
+        os.unlink(path)
+        raise
+
+def saveStreamAs(stream, dest_path, nc=False, verbose=False):
+    """Save a URL to a path as file
+
+    Args:
+        stream (stream): Stream
+        dest_path (str): Local path
+
+    Returns:
+        bool: Success
+    """
+    from os import path, stat
+
+    stream_length = float(stream.headers.get("Content-Length", -1))
+    if path.isfile(dest_path):
+        if nc:
+            return False
+        if stream_length == stat(dest_path).st_size:
+            if verbose:
+                print("Not overwriting same-size file at", dest_path)
+            return False
         else:
-            return re.sub(r"[\\\\/:*?\"<>|\t]|\ +$", repl, string)
+            if verbose:
+                print("File sizes do not match for output", dest_path, ":", stream_length, "!=", stat(dest_path).st_size)
 
-    def getStream(url, prev_url=None):
-        """Extremely light, dumb helper to get a stream from a url
-
-        Args:
-            url (str): Remote URL
-            prev_url (str, optional): Previous url, for relative resolution
-
-        Returns:
-            Requests stream
-        """
-        url = urllib.parse.urljoin(prev_url, url)
-        stream = requests.get(url, stream=True)
-        stream.raise_for_status()
-        return stream
-
-    def _saveChunked(path, response):
-        """Save a binary stream to a path. Dumb.
-
-        Args:
-            path (str): 
-            response (response): 
-        """
-        try:
-            with open(path, 'wb') as file:
-                for chunk in response:
-                    file.write(chunk)
-        except Exception:
-            # Clean up partial file
-            os.unlink(path)
-            raise
-
-    def saveStreamAs(stream, dest_path, nc=False, verbose=False):
-        """Save a URL to a path as file
-
-        Args:
-            stream (stream): Stream
-            dest_path (str): Local path
-
-        Returns:
-            bool: Success
-        """
-        from os import path, stat
-
-        stream_length = float(stream.headers.get("Content-Length", -1))
-        if path.isfile(dest_path):
-            if nc:
-                return False
-            if stream_length == stat(dest_path).st_size:
-                if verbose:
-                    print("Not overwriting same-size file at", dest_path)
-                return False
-            else:
-                if verbose:
-                    print("File sizes do not match for output", dest_path, ":", stream_length, "!=", stat(dest_path).st_size)
-
-        _saveChunked(dest_path, stream)
-        return True
+    _saveChunked(dest_path, stream)
+    return True
 
 
 downloaded_images = []
@@ -86,12 +81,9 @@ downloaded_images = []
 def getArgs():
     import argparse
     ap = argparse.ArgumentParser()
-    ap.add_argument("--artists", nargs="*", default=[],
-                    help="Usernames")
-    ap.add_argument("--albums", nargs="*", default=[],
-                    help="Album URLs")
-    ap.add_argument("--tracks", nargs="*", default=[],
-                    help="Track URLs")
+    ap.add_argument("--artists", nargs="*", default=[], help="Usernames")
+    ap.add_argument("--albums", nargs="*", default=[], help="Album URLs")
+    ap.add_argument("--tracks", nargs="*", default=[], help="Track URLs")
     return ap.parse_args()
 
 
