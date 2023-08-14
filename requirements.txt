@@ -1,0 +1,4 @@
+filetype
+bs4
+requests
+tqdm

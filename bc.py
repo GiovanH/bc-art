@@ -1,6 +1,7 @@
 import asyncio
 import os
 import requests
+import re
 
 from bs4 import BeautifulSoup as bs4
 from urllib.parse import urljoin
@@ -9,12 +10,10 @@ import tqdm
 
 import urllib.parse
 
-def easySlug(string, repl="-", directory=False):
-    import re
-    if directory:
-        return re.sub(r"^\.|\.+$", "", easySlug(string, repl=repl, directory=False))
-    else:
-        return re.sub(r"[\\\\/:*?\"<>|\t]|\ +$", repl, string)
+NORMALIZE_NAMES = True
+INCLUDE_TRACK_NUM_IN_NAMES = False
+
+downloaded_images = []
 
 def getStream(url, prev_url=None):
     """Extremely light, dumb helper to get a stream from a url
@@ -31,13 +30,9 @@ def getStream(url, prev_url=None):
     stream.raise_for_status()
     return stream
 
-def _saveChunked(path, response):
-    """Save a binary stream to a path. Dumb.
 
-    Args:
-        path (str):
-        response (response):
-    """
+def _saveChunked(path, response):
+    """Save a binary stream to a path. Dumb."""
     try:
         with open(path, 'wb') as file:
             for chunk in response:
@@ -46,6 +41,7 @@ def _saveChunked(path, response):
         # Clean up partial file
         os.unlink(path)
         raise
+
 
 def saveStreamAs(stream, dest_path, nc=False, verbose=False):
     """Save a URL to a path as file
@@ -75,7 +71,27 @@ def saveStreamAs(stream, dest_path, nc=False, verbose=False):
     return True
 
 
-downloaded_images = []
+def guessExtension(response):
+    from _data import mime2ext
+    content_type = response.headers.get("Content-Type")
+    ext_match = mime2ext.get(content_type.split(";")[0], "")
+    return ext_match
+
+
+def normalizeFileName(string, repl="-", directory=False):
+    if directory:
+        return re.sub(r"^\.|\.+$", "", normalizeFileName(string, repl=repl, directory=False))
+    else:
+        return re.sub(r"[\\\\/:*?\"<>|\t]|\ +$", repl, string)
+
+
+def normalizeTrackName(track_name):
+    track_name = "-".join(re.split(' ', track_name))
+    track_name = track_name.replace('&', 'and')
+    track_name = re.sub(r'[^a-zA-Z0-9-]', '', track_name)
+    track_name = re.sub(r'-{2,}', '-', track_name)
+    track_name = re.sub(r'^-+|-+$', '', track_name).lower()
+    return track_name
 
 
 def getArgs():
@@ -112,64 +128,51 @@ async def getMetadataFromAlbum(album, artist=None):
             
 
 async def getMetadataFromTrack(track, track_no=None, album=None, artist=None):
-    import re
-    import filetype
 
     track_page = bs4(requests.get(track).text, features="html.parser")
     if not album:
         album = track_page.find("span", class_="fromAlbum").text
 
-    try:        
+    try:
         track_name = track_page.find("h2", class_="trackTitle").text.strip()
         
-        track_name = re.split(' ', track_name)
-        track_name = "-".join(track_name)
-        track_name = re.sub('&', 'and', track_name)
-        track_name = re.sub('[^a-zA-Z0-9\-]', '', track_name)
-        track_name = re.sub('-{2,}', '-', track_name)
-        track_name = re.sub('^-+|-+$', '', track_name).lower()
+        if NORMALIZE_NAMES:
+            track_name = normalizeTrackName(track_name)
+
         if not track_name:
             track_name = f"{track_no}"
 
         if not artist:
             artist = track_page.find("h3", class_="albumTitle").findAll("span")[1].text.strip()
+
         image_url = track_page.find("a", class_="popupImage").get("href")
-        image_url = re.sub('_10.jpg', '_0', image_url)
+        image_url = re.sub(r'_10\.jpg$', '_0', image_url)  # Bandcamp HQ
+
     except AttributeError as e:
         print(e)
         print(track)
         raise
 
     out_dir = os.path.join(
-        easySlug(artist), 
-        easySlug(album)
+        normalizeFileName(artist),
+        normalizeFileName(album)
     )
     os.makedirs(out_dir, exist_ok=True)
 
-    __, ext = os.path.splitext(image_url)
-
-    if track_no:
-        out_filename = f"{easySlug(track_name)}{ext}"
+    if INCLUDE_TRACK_NUM_IN_NAMES and track_no:
+        out_plainname = f"{track_no} {normalizeFileName(track_name)}"
     else:
-        out_filename = f"{easySlug(track_name)}{ext}"
+        out_plainname = f"{normalizeFileName(track_name)}"
 
-    # print(image_url, "->", out_dir, "as", out_filename)
+    print(image_url, "->", out_dir, "as", out_plainname)
     stream = getStream(image_url)
     hash_ = hash(stream.content)
     if hash_ not in downloaded_images:
         saveStreamAs(
             stream,
-            os.path.join(out_dir, out_filename[:247]),
+            os.path.join(out_dir, out_plainname[:243] + guessExtension(stream)),
             nc=True
         )
-
-        test = out_dir + "\\" + out_filename
-        kind = str(filetype.guess(test)).lower()      
-        kind = re.sub('<filetype.types.image', '', kind).split()[0]
-        match = re.search('jpeg', kind)
-        if match:
-            kind = '.jpg'
-        os.rename(test, test + kind)
 
         downloaded_images.append(hash_)
     return
